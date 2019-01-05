@@ -1,4 +1,4 @@
-# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2017 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,136 +12,129 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Simple image classification with Inception.
 
-Run image classification with your model.
-
-This script is usually used with retrain.py found in this same
-directory.
-
-This program creates a graph from a saved GraphDef protocol buffer,
-and runs inference on an input JPEG image. You are required
-to pass in the graph file and the txt file.
-
-It outputs human readable strings of the top 5 predictions along with
-their probabilities.
-
-Change the --image_file argument to any jpg image to compute a
-classification of that image.
-
-Example usage:
-python label_image.py --graph=retrained_graph.pb
-  --labels=retrained_labels.txt
-  --image=flower_photos/daisy/54377391_15648e8d18.jpg
-
-NOTE: To learn to use this file and retrain.py, please see:
-
-https://codelabs.developers.google.com/codelabs/tensorflow-for-poets
-"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import argparse
-import sys
 
+import numpy as np
 import tensorflow as tf
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--image', required=True, type=str, help='Absolute path to image file.')
-parser.add_argument(
-    '--num_top_predictions',
-    type=int,
-    default=5,
-    help='Display this many predictions.')
-parser.add_argument(
-    '--graph',
-    required=True,
-    type=str,
-    help='Absolute path to graph file (.pb)')
-parser.add_argument(
-    '--labels',
-    required=True,
-    type=str,
-    help='Absolute path to labels file (.txt)')
-parser.add_argument(
-    '--output_layer',
-    type=str,
-    default='final_result:0',
-    help='Name of the result operation')
-parser.add_argument(
-    '--input_layer',
-    type=str,
-    default='DecodeJpeg/contents:0',
-    help='Name of the input operation')
 
+def load_graph(model_file):
+  graph = tf.Graph()
+  graph_def = tf.GraphDef()
 
-def load_image(filename):
-  """Read in the image_data to be classified."""
-  return tf.gfile.FastGFile(filename, 'rb').read()
-
-
-def load_labels(filename):
-  """Read in labels, one label per line."""
-  return [line.rstrip() for line in tf.gfile.GFile(filename)]
-
-
-def load_graph(filename):
-  """Unpersists graph from file as default graph."""
-  with tf.gfile.FastGFile(filename, 'rb') as f:
-    graph_def = tf.GraphDef()
+  with open(model_file, "rb") as f:
     graph_def.ParseFromString(f.read())
-    tf.import_graph_def(graph_def, name='')
+  with graph.as_default():
+    tf.import_graph_def(graph_def)
+
+  return graph
 
 
-def run_graph(image_data, labels, input_layer_name, output_layer_name,
-              num_top_predictions):
-  with tf.Session() as sess:
-    # Feed the image_data as input to the graph.
-    #   predictions  will contain a two-dimensional array, where one
-    #   dimension represents the input image count, and the other has
-    #   predictions per class
-    softmax_tensor = sess.graph.get_tensor_by_name(output_layer_name)
-    predictions, = sess.run(softmax_tensor, {input_layer_name: image_data})
+def read_tensor_from_image_file(file_name,
+                                input_height=299,
+                                input_width=299,
+                                input_mean=0,
+                                input_std=255):
+  input_name = "file_reader"
+  output_name = "normalized"
+  file_reader = tf.read_file(file_name, input_name)
+  if file_name.endswith(".png"):
+    image_reader = tf.image.decode_png(
+        file_reader, channels=3, name="png_reader")
+  elif file_name.endswith(".gif"):
+    image_reader = tf.squeeze(
+        tf.image.decode_gif(file_reader, name="gif_reader"))
+  elif file_name.endswith(".bmp"):
+    image_reader = tf.image.decode_bmp(file_reader, name="bmp_reader")
+  else:
+    image_reader = tf.image.decode_jpeg(
+        file_reader, channels=3, name="jpeg_reader")
+  float_caster = tf.cast(image_reader, tf.float32)
+  dims_expander = tf.expand_dims(float_caster, 0)
+  resized = tf.image.resize_bilinear(dims_expander, [input_height, input_width])
+  normalized = tf.divide(tf.subtract(resized, [input_mean]), [input_std])
+  sess = tf.Session()
+  result = sess.run(normalized)
 
-    # Sort to show labels in order of confidence
-    top_k = predictions.argsort()[-num_top_predictions:][::-1]
-    for node_id in top_k:
-      human_string = labels[node_id]
-      score = predictions[node_id]
-      print('%s (score = %.5f)' % (human_string, score))
-
-    return 0
-
-
-def main(argv):
-  """Runs inference on an image."""
-  if argv[1:]:
-    raise ValueError('Unused Command Line Args: %s' % argv[1:])
-
-  if not tf.gfile.Exists(FLAGS.image):
-    tf.logging.fatal('image file does not exist %s', FLAGS.image)
-
-  if not tf.gfile.Exists(FLAGS.labels):
-    tf.logging.fatal('labels file does not exist %s', FLAGS.labels)
-
-  if not tf.gfile.Exists(FLAGS.graph):
-    tf.logging.fatal('graph file does not exist %s', FLAGS.graph)
-
-  # load image
-  image_data = load_image(FLAGS.image)
-
-  # load labels
-  labels = load_labels(FLAGS.labels)
-
-  # load graph, which is stored in the default session
-  load_graph(FLAGS.graph)
-
-  run_graph(image_data, labels, FLAGS.input_layer, FLAGS.output_layer,
-            FLAGS.num_top_predictions)
+  return result
 
 
-if __name__ == '__main__':
-  FLAGS, unparsed = parser.parse_known_args()
-  tf.app.run(main=main, argv=sys.argv[:1]+unparsed)
+def load_labels(label_file):
+  label = []
+  proto_as_ascii_lines = tf.gfile.GFile(label_file).readlines()
+  for l in proto_as_ascii_lines:
+    label.append(l.rstrip())
+  return label
+
+
+if __name__ == "__main__":
+  file_name = "tensorflow/examples/label_image/data/grace_hopper.jpg"
+  model_file = \
+    "tensorflow/examples/label_image/data/inception_v3_2016_08_28_frozen.pb"
+  label_file = "tensorflow/examples/label_image/data/imagenet_slim_labels.txt"
+  input_height = 299
+  input_width = 299
+  input_mean = 0
+  input_std = 255
+  input_layer = "input"
+  output_layer = "InceptionV3/Predictions/Reshape_1"
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--image", help="image to be processed")
+  parser.add_argument("--graph", help="graph/model to be executed")
+  parser.add_argument("--labels", help="name of file containing labels")
+  parser.add_argument("--input_height", type=int, help="input height")
+  parser.add_argument("--input_width", type=int, help="input width")
+  parser.add_argument("--input_mean", type=int, help="input mean")
+  parser.add_argument("--input_std", type=int, help="input std")
+  parser.add_argument("--input_layer", help="name of input layer")
+  parser.add_argument("--output_layer", help="name of output layer")
+  args = parser.parse_args()
+
+  if args.graph:
+    model_file = args.graph
+  if args.image:
+    file_name = args.image
+  if args.labels:
+    label_file = args.labels
+  if args.input_height:
+    input_height = args.input_height
+  if args.input_width:
+    input_width = args.input_width
+  if args.input_mean:
+    input_mean = args.input_mean
+  if args.input_std:
+    input_std = args.input_std
+  if args.input_layer:
+    input_layer = args.input_layer
+  if args.output_layer:
+    output_layer = args.output_layer
+
+  graph = load_graph(model_file)
+  t = read_tensor_from_image_file(
+      file_name,
+      input_height=input_height,
+      input_width=input_width,
+      input_mean=input_mean,
+      input_std=input_std)
+
+  input_name = "import/" + input_layer
+  output_name = "import/" + output_layer
+  input_operation = graph.get_operation_by_name(input_name)
+  output_operation = graph.get_operation_by_name(output_name)
+
+  with tf.Session(graph=graph) as sess:
+    results = sess.run(output_operation.outputs[0], {
+        input_operation.outputs[0]: t
+    })
+  results = np.squeeze(results)
+
+  top_k = results.argsort()[-5:][::-1]
+  labels = load_labels(label_file)
+  for i in top_k:
+    print(labels[i], results[i])
