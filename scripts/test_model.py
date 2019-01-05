@@ -7,7 +7,7 @@ import numpy as np
 
 if __name__ == '__main__':
 
-	model_file = 'models/mobilenet_v2_1.4_224.pb'
+	model_file = 'models/output_graph.pb'
 
 	graph = tf.Graph()
 	graph_def = tf.GraphDef()
@@ -17,7 +17,9 @@ if __name__ == '__main__':
 	with graph.as_default():
 		tf.import_graph_def(graph_def)
 
-	input_operation = graph.get_operation_by_name('import/Placeholder')
+	print("Operations: {0}".format(graph.get_operations()))
+
+	input_operation = graph.get_operation_by_name('import/input')
 	output_operation = graph.get_operation_by_name('import/final_result')
 
 	with tf.Session(graph=graph) as sess:
