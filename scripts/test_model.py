@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import time
 import argparse
+import glob
 
 def load_and_prepare_image(image, img_size=224):
     """
@@ -29,16 +30,16 @@ def load_image_tensor(image, input_h, input_w, input_m, input_s):
 
 if __name__ == '__main__':
 
-	model_file = 'models/mobilenet_1.0_224.pb'
+	model_file = 'models/mobilenet_1.0_224.site.pb'
 	labels = ['green', 'none', 'red', 'yellow']
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--image", help="image to be processed")
+	parser.add_argument("--dir", help="dir of images to be processed")
 	args = parser.parse_args()
 
-	file_name = 'test_pics/001.png'
-	if args.image:
-		file_name = args.image
+	dir_name = 'test_pics'
+	if args.dir:
+		dir_name = args.dir
 
 	graph = tf.Graph()
 	graph_def = tf.GraphDef()
@@ -58,9 +59,13 @@ if __name__ == '__main__':
 		input_m = 0
 		input_s = 255
 
-		img = cv2.imread(file_name)
-		tensor = sess.run(load_image_tensor(img, input_h, input_w, input_m, input_s))
-		results = sess.run(output_operation.outputs[0], {input_operation.outputs[0]: tensor})
-		results = np.squeeze(results)
-		top_k = results.argsort()[-5:][::-1]
-	print('Total Total: {0}'.format(time.time()-tt))
+		l = glob.glob(dir_name + '/**/*.jpg')
+		for f in l:
+			img = cv2.imread(f)
+			tensor = sess.run(load_image_tensor(img, input_h, input_w, input_m, input_s))
+			results = sess.run(output_operation.outputs[0], {input_operation.outputs[0]: tensor})
+			results = np.squeeze(results)
+			top_k = results.argsort()[-5:][::-1]
+			print('File: {0} Time: {1}'.format(f, time.time()-tt))
+			print('   Result: {0}'.format(labels[top_k[0]]))
+			print('      Results: {0}'.format(['{0}: {1}'.format(labels[i], results[i]) for i in top_k]))
